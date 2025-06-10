@@ -15,9 +15,17 @@ var DB = make(map[string]string)
 const dbFile = "redis.db"
 
 func main() {
-	err := loadDB()
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalln("Could not get working directory:", err)
+	}
+	log.Println("Working directory:", wd)
+
+	err = loadDB()
 	if err != nil {
 		log.Println("Could not load database:", err)
+	} else {
+		log.Println("Database loaded successfully")
 	}
 
 	ln, err := net.Listen("tcp", ":6379")
@@ -48,7 +56,7 @@ func handleConnection(conn net.Conn) {
 		switch cmd {
 		case "SET":
 			if len(args) != 3 {
-				fmt.Fprintln(conn, "Error: Wrong number of arguments for 'SET'")
+				fmt.Fprintf(conn, "-ERR wrong number of arguments for '%s' command\r\n", strings.ToLower(args[0]))
 				continue
 			}
 			key, value := args[1], args[2]
@@ -56,32 +64,36 @@ func handleConnection(conn net.Conn) {
 			if err := persistDB(); err != nil {
 				log.Println("Failed to persist DB:", err)
 			}
-			fmt.Fprintln(conn, "OK")
+			fmt.Fprint(conn, "+OK\r\n")
 		case "GET":
 			if len(args) != 2 {
-				fmt.Fprintln(conn, "Error: Wrong number of arguments for 'GET'")
+				fmt.Fprintf(conn, "-ERR wrong number of arguments for '%s' command\r\n", strings.ToLower(args[0]))
 				continue
 			}
 			key := args[1]
 			val, ok := DB[key]
 			if !ok {
-				fmt.Fprintln(conn, "(nil)")
+				fmt.Fprint(conn, "$-1\r\n")
 			} else {
-				fmt.Fprintln(conn, val)
+				fmt.Fprintf(conn, "$%d\r\n%s\r\n", len(val), val)
 			}
 		case "DELETE":
 			if len(args) != 2 {
-				fmt.Fprintln(conn, "Error: Wrong number of arguments for 'DELETE'")
+				fmt.Fprintf(conn, "-ERR wrong number of arguments for '%s' command\r\n", strings.ToLower(args[0]))
 				continue
 			}
 			key := args[1]
-			delete(DB, key)
-			if err := persistDB(); err != nil {
-				log.Println("Failed to persist DB:", err)
+			if _, ok := DB[key]; ok {
+				delete(DB, key)
+				if err := persistDB(); err != nil {
+					log.Println("Failed to persist DB:", err)
+				}
+				fmt.Fprint(conn, ":1\r\n")
+			} else {
+				fmt.Fprint(conn, ":0\r\n")
 			}
-			fmt.Fprintln(conn, "OK")
 		default:
-			fmt.Fprintln(conn, "Error: Unknown command")
+			fmt.Fprintf(conn, "-ERR unknown command '%s'\r\n", strings.ToLower(args[0]))
 		}
 	}
 }
